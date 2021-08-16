@@ -61,17 +61,14 @@ impl Apply<Mint> for Plutocracy {
 
 #[no_mangle]
 fn total_supply(
-    slf: &Plutocracy,
+    s: &Plutocracy,
     q: &TotalSupply,
-) -> *const <TotalSupply as Method>::Return {
-    &slf.query(q)
+    r: &mut <TotalSupply as Method>::Return,
+) {
+    *r = s.query(q);
 }
 
 #[no_mangle]
-fn mint<'a>(
-    slf: &'a mut Plutocracy,
-    t: &'a Mint,
-) -> (&'a mut Plutocracy, *const <Mint as Method>::Return) {
-    let ret = slf.apply(t);
-    (slf, &ret)
+fn mint(s: &mut Plutocracy, q: &Mint, r: &mut <Mint as Method>::Return) {
+    *r = s.query(q);
 }
