@@ -4,18 +4,22 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
-use rkyv::{Archive, Serialize};
+use std::pin::Pin;
+
+use rkyv::{
+    ser::{serializers::WriteSerializer, Serializer},
+    Archive, Serialize,
+};
 use vm_proto::{Apply, Contract, Method, Query};
 
-#[derive(Archive, Serialize, Debug)]
+#[derive(Archive, Serialize, Debug, Default)]
 pub struct Plutocracy {
     treasury: u64,
-    name: String,
 }
 
 impl Plutocracy {
-    pub fn new(name: String) -> Self {
-        Plutocracy { treasury: 0, name }
+    pub fn new() -> Self {
+        Plutocracy { treasury: 0 }
     }
 }
 
@@ -52,7 +56,7 @@ impl Method for Mint {
 }
 
 impl Apply<Mint> for Plutocracy {
-    fn apply(&mut self, mint: &Mint) {
+    fn apply(mut self: Pin<&mut Self>, mint: &Mint) {
         self.treasury += mint.amount
     }
 }
@@ -69,6 +73,6 @@ fn total_supply(
 }
 
 #[no_mangle]
-fn mint(s: &mut Plutocracy, q: &Mint, r: &mut <Mint as Method>::Return) {
-    *r = s.query(q);
+fn mint(s: Pin<&mut Plutocracy>, t: &Mint, r: &mut <Mint as Method>::Return) {
+    *r = s.apply(t);
 }

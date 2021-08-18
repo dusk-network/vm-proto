@@ -7,16 +7,15 @@ use crate::definitions::*;
 
 //use rkyv::de::deserializers::*;
 use rkyv::validation::CheckArchiveError;
-use rkyv::with::With;
 use rkyv::{
     check_archived_root, ser::serializers::*, ser::Serializer,
     validation::validators::DefaultValidator, Archive,
 };
-use rkyv::{AlignedVec, Deserialize, Fallible, Infallible, Serialize};
+use rkyv::{AlignedVec, Deserialize, Infallible, Serialize};
 
 use thiserror::Error;
 use wasmer::{
-    imports, CompileError, ExportError, Instance, MemoryError, Module, RuntimeError, Store, Value,
+    imports, CompileError, ExportError, Instance, MemoryError, Module, RuntimeError, Store,
 };
 
 type DefaultSerializer = CompositeSerializer<
@@ -31,26 +30,6 @@ type DefaultSerializer = CompositeSerializer<
     // want to serialize shared pointers. Only pay for what you need!
     Infallible,
 >;
-type SerializeResult<T> = Result<T, <DefaultSerializer as Fallible>::Error>;
-
-// // We'll bound T by making sure that our default serializer can serialize it.
-// // If we try to serialize a type that's not supported like a shared pointer,
-// // it will be a compiler error until we add that capability to our serializer.
-// // This function will return a result with the number of bytes written.
-// fn serialize_into<'a, T>(value: &T, bytes: &'a mut [u8]) -> SerializeResult<'a, usize>
-// where
-//     T: Serialize<DefaultSerializer<'a>>,
-// {
-//     let mut serializer = DefaultSerializer::new(
-//         // Our serializer is first, we need to pass it our bytes
-//         WriteSerializer::new(bytes),
-//         // The rest all implement Default
-//         Default::default(),
-//         Default::default(),
-//     );
-//     serializer.serialize_value(value)?;
-//     Ok(serializer.pos())
-// }
 
 #[derive(Error, Debug)]
 pub enum VMError {
@@ -140,84 +119,119 @@ impl State {
         <M::Return as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
             + Deserialize<<M as Method>::Return, Infallible>,
     {
-        match self.map.get(&id) {
-            Some(contract) => {
-                let module = Module::new(&self.wasmer_store, &contract.code)?;
-                let import_object = imports! {};
-                let instance = Instance::new(&module, &import_object).unwrap();
-                let function = instance
-                    .exports
-                    .get_native_function::<(i32, i32, i32), ()>(M::NAME)?;
-                let memory = instance.exports.get_memory("memory")?;
+        if let Some(contract) = self.map.get(&id) {
+            let module = Module::new(&self.wasmer_store, &contract.code)?;
+            let import_object = imports! {};
+            let instance = Instance::new(&module, &import_object).unwrap();
+            let function = instance
+                .exports
+                .get_native_function::<(i32, i32, i32), ()>(M::NAME)?;
+            let memory = instance.exports.get_memory("memory")?;
 
-                // Copy the data the contract needs to execute correctly into its memory.
+            // Copy the data the contract needs to execute correctly into its memory.
 
-                // this is first the state of the contract, then the argument, and finally allocated space for the return value.
+            // this is first the state of the contract, then the argument, and finally allocated space for the return value.
 
-                let (arg_ofs, ret_ofs) = unsafe {
-                    // Unsafe because the compiler cannot guarantee that no one else is accessing this memory at this time
+            let (arg_ofs, ret_ofs) = unsafe {
+                // Unsafe because the compiler cannot guarantee that no one else is accessing this memory at this time
 
-                    let mem_slice = memory.data_unchecked_mut();
+                let mem_slice = memory.data_unchecked_mut();
 
-                    let state = &contract.state;
-                    let state_len = state.len();
-                    mem_slice[0..state_len].copy_from_slice(state);
+                let state = &contract.state;
+                let state_len = state.len();
+                mem_slice[0..state_len].copy_from_slice(state);
 
-                    let mut remaining_slice = &mut mem_slice[state_len..];
+                let remaining_slice = &mut mem_slice[state_len..];
 
-                    let state_len = state_len as i32;
+                let state_len = state_len as i32;
 
-                    // Write the argument into wasm memory
+                // Write the argument into wasm memory
 
-                    let mut serialize = WriteSerializer::new(remaining_slice);
-                    let arg_ofs = state_len + serialize.serialize_value(arg)? as i32;
+                let mut serialize = WriteSerializer::new(remaining_slice);
+                let arg_ofs = state_len + serialize.serialize_value(arg)? as i32;
 
-                    // make sure we have enough space for the return value
+                // TODO, make sure we have enough room in the memory for the return value
 
-                    let ret_ofs = arg_ofs + mem::size_of::<M>() as i32;
+                (arg_ofs, arg_ofs + mem::size_of::<M>() as i32)
+            };
 
-                    // TODO, make sure we have enough room in the memory
+            function.call(contract.state_ofs, arg_ofs, ret_ofs)?;
 
-                    (arg_ofs, arg_ofs + mem::size_of::<M>() as i32)
-                };
-
-                function.call(contract.state_ofs, arg_ofs, ret_ofs)?;
-
-                unsafe {
-                    let mem_slice = memory.data_unchecked();
-                    let ret_ofs = ret_ofs as usize;
-                    let ret_len = mem::size_of::<<M as Method>::Return>();
-
-                    let ret_slice = &mem_slice[ret_ofs..][..ret_len];
-
-                    let archived = check_archived_root::<M::Return>(ret_slice)?;
-
-                    let a = archived.deserialize(&mut Infallible)?;
-
-                    Ok(a)
-                }
+            unsafe {
+                let mem_slice = memory.data_unchecked();
+                let ret_ofs = ret_ofs as usize;
+                let ret_len = mem::size_of::<<M as Method>::Return>();
+                let ret_slice = &mem_slice[ret_ofs..][..ret_len];
+                let archived = check_archived_root::<M::Return>(ret_slice)?;
+                let a = archived.deserialize(&mut Infallible)?;
+                Ok(a)
             }
-            None => Err(VMError::UnknownContract),
+        } else {
+            Err(VMError::UnknownContract)
         }
     }
 
-    pub fn apply<M>(&mut self, id: ContractId, method: &M) -> Result<M::Return, VMError>
+    pub fn apply<M>(&mut self, id: ContractId, arg: &M) -> Result<M::Return, VMError>
     where
-        M: Method,
+        M: Method + Archive + for<'a> Serialize<WriteSerializer<&'a mut [u8]>>,
+        M::Return: Archive,
+        <M::Return as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
+            + Deserialize<<M as Method>::Return, Infallible>,
     {
-        if let Some(contract) = self.map.get(&id) {
-            let module = Module::new(&self.wasmer_store, &contract.code).unwrap();
+        if let Some(contract) = self.map.get_mut(&id) {
+            let module = Module::new(&self.wasmer_store, &contract.code)?;
             let import_object = imports! {};
-
             let instance = Instance::new(&module, &import_object).unwrap();
+            let function = instance
+                .exports
+                .get_native_function::<(i32, i32, i32), ()>(M::NAME)?;
+            let memory = instance.exports.get_memory("memory")?;
 
-            let check = instance.exports.get_function(M::NAME).unwrap();
+            // Copy the data the contract needs to execute correctly into its memory.
 
-            let result = check.call(&[Value::I32(42)]).unwrap();
+            // this is first the state of the contract, then the argument, and finally allocated space for the return value.
 
-            dbg!(result);
+            let state_len = contract.state.len();
 
-            todo!()
+            let (arg_ofs, ret_ofs) = unsafe {
+                // Unsafe because the compiler cannot guarantee that no one else is accessing this memory at this time
+
+                let mem_slice = memory.data_unchecked_mut();
+
+                mem_slice[0..state_len].copy_from_slice(&contract.state);
+
+                let remaining_slice = &mut mem_slice[state_len..];
+
+                let state_len = state_len as i32;
+
+                // Write the argument into wasm memory
+
+                let mut serialize = WriteSerializer::new(remaining_slice);
+                let arg_ofs = state_len + serialize.serialize_value(arg)? as i32;
+
+                // make sure we have enough space for the return value
+
+                let ret_ofs = arg_ofs + mem::size_of::<M>() as i32;
+
+                // TODO, make sure we have enough room in the memory
+
+                (arg_ofs, arg_ofs + mem::size_of::<M>() as i32)
+            };
+
+            function.call(contract.state_ofs, arg_ofs, ret_ofs)?;
+
+            unsafe {
+                let mem_slice = memory.data_unchecked();
+
+                contract.state[..].copy_from_slice(&mem_slice[..state_len]);
+
+                let ret_ofs = ret_ofs as usize;
+                let ret_len = mem::size_of::<<M as Method>::Return>();
+                let ret_slice = &mem_slice[ret_ofs..][..ret_len];
+                let archived = check_archived_root::<M::Return>(ret_slice)?;
+                let a = archived.deserialize(&mut Infallible)?;
+                Ok(a)
+            }
         } else {
             Err(VMError::UnknownContract)
         }

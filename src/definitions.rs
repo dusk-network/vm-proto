@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, pin::Pin};
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
 pub struct ContractId([u8; 32]);
@@ -17,5 +17,5 @@ pub trait Query<Q: Method> {
 }
 
 pub trait Apply<T: Method> {
-    fn apply(&mut self, t: &T) -> T::Return;
+    fn apply(self: Pin<&mut Self>, t: &T) -> T::Return;
 }
