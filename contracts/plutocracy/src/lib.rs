@@ -6,11 +6,8 @@
 
 use std::pin::Pin;
 
-use rkyv::{
-    ser::{serializers::WriteSerializer, Serializer},
-    Archive, Serialize,
-};
-use vm_proto::{Apply, Contract, Method, Query};
+use rkyv::{Archive, Serialize};
+use vm_proto::{Apply, Method, Query};
 
 #[derive(Archive, Serialize, Debug, Default)]
 pub struct Plutocracy {
@@ -20,14 +17,6 @@ pub struct Plutocracy {
 impl Plutocracy {
     pub fn new() -> Self {
         Plutocracy { treasury: 0 }
-    }
-}
-
-impl Contract for Plutocracy {
-    fn code() -> &'static [u8] {
-        include_bytes!(
-            "../target/wasm32-unknown-unknown/release/plutocracy.wasm"
-        )
     }
 }
 

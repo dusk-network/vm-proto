@@ -92,16 +92,17 @@ pub struct State {
 }
 
 impl State {
-    pub fn deploy<C>(&mut self, contract: C) -> Result<ContractId, VMError>
+    pub fn deploy<State, Code>(&mut self, state: State, code: Code) -> Result<ContractId, VMError>
     where
-        C: Contract + Debug + Serialize<DefaultSerializer>,
+        State: Debug + Serialize<DefaultSerializer>,
+        Code: Into<Vec<u8>>,
     {
         let mut serialize = DefaultSerializer::default();
-        let state_ofs = serialize.serialize_value(&contract)?;
+        let state_ofs = serialize.serialize_value(&state)?;
         let state = serialize.into_serializer().into_inner();
 
         let instance = ContractInstance {
-            code: C::code().into(),
+            code: code.into(),
             state,
             state_ofs: state_ofs as i32,
         };
@@ -208,10 +209,6 @@ impl State {
 
                 let mut serialize = WriteSerializer::new(remaining_slice);
                 let arg_ofs = state_len + serialize.serialize_value(arg)? as i32;
-
-                // make sure we have enough space for the return value
-
-                let ret_ofs = arg_ofs + mem::size_of::<M>() as i32;
 
                 // TODO, make sure we have enough room in the memory
 

@@ -1,5 +1,5 @@
 [package]
-name = "plutocracy"
+name = "funlink"
 version = "0.1.0"
 authors = ["Kristoffer Ström <kristoffer@dusk.network>"]
 edition = "2018"
@@ -10,3 +10,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rkyv = { version = "0.7", default-features = false, features = ["size_32", "archive_le"] }
 vm-proto = { path = "../..", default-features = false }
+microkelvin = { path = "../../../microkelvin" }
