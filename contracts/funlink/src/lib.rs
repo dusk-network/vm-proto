@@ -63,6 +63,6 @@ fn push(s: Pin<&mut FunLink>, t: &Push, r: &mut <Push as Method>::Return) {
 }
 
 #[no_mangle]
-fn mint(s: Pin<&mut FunLink>, t: &Pop, r: &mut <Pop as Method>::Return) {
+fn pop(s: Pin<&mut FunLink>, t: &Pop, r: &mut <Pop as Method>::Return) {
     *r = s.apply(t);
 }

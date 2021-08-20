@@ -120,9 +120,19 @@ impl State {
         <M::Return as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
             + Deserialize<<M as Method>::Return, Infallible>,
     {
+        fn debug(string: &'static str) {
+            println!("debug: {}", string)
+        }
+
+        let debug_func = Function::new_native(&store, debug);
+
         if let Some(contract) = self.map.get(&id) {
             let module = Module::new(&self.wasmer_store, &contract.code)?;
-            let import_object = imports! {};
+            let import_object = imports! {
+            "env" => {
+                "debug" => debug_import,
+            }
+            };
             let instance = Instance::new(&module, &import_object).unwrap();
             let function = instance
                 .exports
@@ -223,9 +233,9 @@ impl State {
                 contract.state[..].copy_from_slice(&mem_slice[..state_len]);
 
                 let ret_ofs = ret_ofs as usize;
-                let ret_len = mem::size_of::<<M as Method>::Return>();
+                let ret_len = mem::size_of::<<<M as Method>::Return as Archive>::Archived>();
                 let ret_slice = &mem_slice[ret_ofs..][..ret_len];
-                let archived = check_archived_root::<M::Return>(ret_slice)?;
+                let archived = check_archived_root::<<M as Method>::Return>(ret_slice)?;
                 let a = archived.deserialize(&mut Infallible)?;
                 Ok(a)
             }

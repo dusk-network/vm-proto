@@ -1,4 +1,4 @@
-use std::{fmt::Debug, pin::Pin};
+use core::{fmt::Debug, pin::Pin};
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
 pub struct ContractId([u8; 32]);

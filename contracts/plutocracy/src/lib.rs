@@ -3,8 +3,9 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
+#![no_std]
 
-use std::pin::Pin;
+use core::pin::Pin;
 
 use rkyv::{Archive, Serialize};
 use vm_proto::{Apply, Method, Query};

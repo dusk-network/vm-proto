@@ -10,4 +10,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rkyv = { version = "0.7", default-features = false, features = ["size_32", "archive_le"] }
 vm-proto = { path = "../..", default-features = false }
-microkelvin = { path = "../../../microkelvin" }
+microkelvin = { path = "../../../microkelvin", default-features = false }
