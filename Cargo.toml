@@ -5,15 +5,15 @@ edition = "2018"
 
 [dependencies]
 bytecheck = { version = "0.6", optional = true }
-rkyv = { version = "=0.7.10", default-features = false, features = ["size_32", "archive_le"] }
+rkyv = { version = "0.7", default-features = false, features = ["size_32", "archive_le"] }
 thiserror = "1.0"
 wasmer = { version = "2.0", optional = true }
 wee_alloc = "0.4"
 
 [dev-dependencies]
 plutocracy = { path = "contracts/plutocracy" }
-funlink = { path = "contracts/funlink" }
+funlink = { path = "contracts/funlink", features = ["host"] }
 
 [features]
 default = ["host"]
-host = ["wasmer", "bytecheck", "rkyv/validation"]
+host = ["wasmer", "bytecheck", "rkyv/validation", "rkyv/std"]

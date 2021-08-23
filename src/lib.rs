@@ -10,8 +10,7 @@ mod host;
 #[cfg(feature = "host")]
 pub use host::*;
 
-#[cfg(not(feature = "host"))]
-mod no_std_plumbing;
+pub mod abi;
 
 #[cfg(not(feature = "host"))]
-pub mod abi;
+mod no_std_plumbing;

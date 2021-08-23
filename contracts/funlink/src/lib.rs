@@ -51,6 +51,7 @@ impl Apply<Pop> for FunLink {
         mut self: Pin<&mut Self>,
         _pop: &Pop,
     ) -> Result<Option<i32>, LinkError> {
+        vm_proto::abi::debug("yolo");
         self.list.pop()
     }
 }
