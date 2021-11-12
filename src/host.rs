@@ -124,7 +124,7 @@ struct TransactionEnv {
 impl State {
     pub fn deploy<State, Code>(&mut self, state: State, code: Code) -> Result<ContractId, VMError>
     where
-        State: Debug + Serialize<DefaultSerializer>,
+        State: Serialize<DefaultSerializer>,
         Code: Into<Vec<u8>>,
     {
         let mut serialize = DefaultSerializer::default();
@@ -201,7 +201,7 @@ impl State {
         }
     }
 
-    pub fn apply<M>(&mut self, id: ContractId, arg: &M) -> Result<M::Return, VMError>
+    pub fn apply<M>(&mut self, id: ContractId, arg: M) -> Result<M::Return, VMError>
     where
         M: Method + Archive + for<'a> Serialize<WriteSerializer<&'a mut [u8]>>,
         M::Return: Archive,
@@ -232,7 +232,7 @@ impl State {
             // Write the argument into wasm memory
 
             let mut serialize = WriteSerializer::new(remaining_slice);
-            let arg_ofs = state_len as i32 + serialize.serialize_value(arg)? as i32;
+            let arg_ofs = state_len as i32 + serialize.serialize_value(&arg)? as i32;
 
             // FIXME: make sure we have enough room in the memory
 

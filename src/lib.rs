@@ -4,6 +4,9 @@
 mod definitions;
 pub use definitions::*;
 
+mod scratch;
+pub use scratch::Scratch;
+
 #[cfg(feature = "host")]
 mod host;
 

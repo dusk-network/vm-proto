@@ -5,16 +5,27 @@
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
 use microkelvin::{
-    Annotation, Child, ChildMut, Compound, Link, LinkError, MutableLeaves,
+    Annotation, ArchivedChild, ArchivedCompound, Child, ChildMut, Compound,
+    Link, MutableLeaves, Storage, StorageSerializer,
 };
-use rkyv::{Archive, Serialize};
+use rkyv::{Archive, Deserialize, Serialize};
 
-#[derive(Clone, Archive, Serialize, Debug)]
+#[derive(Clone, Archive, Serialize, Deserialize)]
+#[archive(bound(serialize = "
+  T: Serialize<Storage>,
+  A: Annotation<T>,
+  __S: StorageSerializer"))]
+#[archive(bound(deserialize = "
+  A: Archive + Clone,
+  T::Archived: Deserialize<T, __D>,
+  A::Archived: Deserialize<A, __D>,
+  __D: Sized"))]
 pub enum LinkedList<T, A> {
     Empty,
     Node {
         val: T,
-        next: Link<LinkedList<T, A>, A>,
+        #[omit_bounds]
+        next: Link<Self, A>,
     },
 }
 
@@ -24,44 +35,56 @@ impl<T, A> Default for LinkedList<T, A> {
     }
 }
 
-impl<T, A> Compound<A> for LinkedList<T, A>
+impl<T, A> ArchivedCompound<LinkedList<T, A>, A> for ArchivedLinkedList<T, A>
 where
-    T: Clone,
-    A: Annotation<T> + Clone,
+    T: Archive,
+    A: Annotation<T>,
 {
-    type Leaf = T;
-
-    fn child(&self, ofs: usize) -> Child<Self, A>
-    where
-        A: Annotation<Self::Leaf>,
-    {
+    fn child(&self, ofs: usize) -> ArchivedChild<LinkedList<T, A>, A> {
         match (self, ofs) {
-            (LinkedList::Node { val, .. }, 0) => Child::Leaf(val),
-            (LinkedList::Node { next, .. }, 1) => Child::Node(next),
-            (LinkedList::Node { .. }, _) => Child::EndOfNode,
-            (LinkedList::Empty, _) => Child::EndOfNode,
-        }
-    }
-
-    fn child_mut(&mut self, ofs: usize) -> ChildMut<Self, A>
-    where
-        A: Annotation<Self::Leaf>,
-    {
-        match (self, ofs) {
-            (LinkedList::Node { val, .. }, 0) => ChildMut::Leaf(val),
-            (LinkedList::Node { next, .. }, 1) => ChildMut::Node(next),
-            (LinkedList::Node { .. }, _) => ChildMut::EndOfNode,
-            (LinkedList::Empty, _) => ChildMut::EndOfNode,
+            (ArchivedLinkedList::Node { val, .. }, 0) => {
+                ArchivedChild::Leaf(val)
+            }
+            (ArchivedLinkedList::Node { next, .. }, 1) => {
+                ArchivedChild::Node(next)
+            }
+            (ArchivedLinkedList::Node { .. }, _) => ArchivedChild::EndOfNode,
+            (ArchivedLinkedList::Empty, _) => ArchivedChild::EndOfNode,
         }
     }
 }
 
-impl<T, A> MutableLeaves for LinkedList<T, A> where A: Annotation<T> {}
+impl<T, A> Compound<A> for LinkedList<T, A>
+where
+    T: Archive,
+    A: Annotation<T>,
+{
+    type Leaf = T;
+
+    fn child(&self, ofs: usize) -> Child<Self, A> {
+        match (ofs, self) {
+            (0, LinkedList::Node { val, .. }) => Child::Leaf(val),
+            (1, LinkedList::Node { next, .. }) => Child::Node(next),
+            (_, LinkedList::Node { .. }) => Child::EndOfNode,
+            (_, LinkedList::Empty) => Child::EndOfNode,
+        }
+    }
+
+    fn child_mut(&mut self, ofs: usize) -> ChildMut<Self, A> {
+        match (ofs, self) {
+            (0, LinkedList::Node { val, .. }) => ChildMut::Leaf(val),
+            (1, LinkedList::Node { next, .. }) => ChildMut::Node(next),
+            (_, LinkedList::Node { .. }) => ChildMut::EndOfNode,
+            (_, LinkedList::Empty) => ChildMut::EndOfNode,
+        }
+    }
+}
+
+impl<T, A> MutableLeaves for LinkedList<T, A> where A: Archive + Annotation<T> {}
 
 impl<T, A> LinkedList<T, A>
 where
-    T: Clone,
-    A: Clone + Annotation<T>,
+    A: Annotation<T>,
 {
     pub fn new() -> Self {
         Default::default()
@@ -84,258 +107,17 @@ where
         }
     }
 
-    pub fn pop(&mut self) -> Result<Option<T>, LinkError> {
+    pub fn pop(&mut self) -> Option<T>
+    where
+        T: Clone,
+        A: Clone,
+    {
         match core::mem::take(self) {
-            LinkedList::Empty => Ok(None),
+            LinkedList::Empty => None,
             LinkedList::Node { val: t, next } => {
-                *self = next.into_compound()?;
-                Ok(Some(t))
+                *self = next.unlink();
+                Some(t)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use microkelvin::{Cardinality, First, Nth};
-
-    #[test]
-    fn push() {
-        let n: u64 = 1024;
-
-        let mut list = LinkedList::<_, ()>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-    }
-
-    #[test]
-    fn push_cardinality() {
-        let n: u64 = 1024;
-
-        let mut list = LinkedList::<_, Cardinality>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-    }
-
-    #[test]
-    fn push_nth() -> Result<(), LinkError> {
-        let n: u64 = 1024;
-
-        let mut list = LinkedList::<_, Cardinality>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        for i in 0..n {
-            assert_eq!(*list.nth(i)?.expect("Some(branch)"), n - i - 1)
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn push_pop() -> Result<(), LinkError> {
-        let n: u64 = 1024;
-
-        let mut list = LinkedList::<_, ()>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        for i in 0..n {
-            assert_eq!(list.pop()?, Some(n - i - 1))
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn push_mut() -> Result<(), LinkError> {
-        let n: u64 = 1024;
-
-        use microkelvin::{Cardinality, Nth};
-
-        let mut list = LinkedList::<_, Cardinality>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        for i in 0..n {
-            *list.nth_mut(i)?.expect("Some(branch)") += 1
-        }
-
-        for i in 0..n {
-            assert_eq!(*list.nth(i)?.expect("Some(branch)"), n - i)
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn iterate_immutable() -> Result<(), LinkError> {
-        let n: u64 = 16;
-
-        let mut list = LinkedList::<_, Cardinality>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        // branch from first element
-        let branch = list.first()?.expect("Some(branch)");
-
-        let mut count = n;
-
-        for res_leaf in branch {
-            let leaf = res_leaf?;
-
-            count -= 1;
-
-            assert_eq!(*leaf, count);
-        }
-
-        // branch from 7th element
-        let branch = list.nth(6)?.expect("Some(branch)");
-
-        let mut count = n - 6;
-
-        for res_leaf in branch {
-            let leaf = res_leaf?;
-
-            count -= 1;
-
-            assert_eq!(*leaf, count);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn iterate_mutable() -> Result<(), LinkError> {
-        let n: u64 = 32;
-
-        use microkelvin::{Cardinality, Nth};
-
-        let mut list = LinkedList::<_, Cardinality>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        // branch from first element
-        let branch_mut = list.first_mut()?.expect("Some(branch_mut)");
-
-        let mut count = n;
-
-        for res_leaf in branch_mut {
-            *res_leaf? += 1;
-        }
-
-        // branch from first element
-        let branch = list.first()?.expect("Some(brach)");
-
-        for res_leaf in branch {
-            let leaf = res_leaf?;
-
-            assert_eq!(*leaf, count);
-
-            count -= 1;
-        }
-
-        // branch from 8th element
-        let branch = list.nth(7)?.expect("Some(branch)");
-
-        let mut count = n - 7;
-
-        for res_leaf in branch {
-            let leaf = res_leaf?;
-
-            assert_eq!(*leaf, count);
-
-            count -= 1;
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn iterate_map() -> Result<(), LinkError> {
-        let n: u64 = 32;
-
-        let mut list = LinkedList::<_, ()>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        // branch from first element
-        let branch_mut = list.first()?.expect("Some(brach_mut)");
-        let mapped = branch_mut.map_leaf(|x| x);
-
-        let mut count = n - 1;
-
-        for leaf in mapped {
-            let leaf = leaf?;
-
-            assert_eq!(*leaf, count);
-
-            count = count.saturating_sub(1);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn iterate_map_mutable() -> Result<(), LinkError> {
-        let n: u64 = 32;
-
-        let mut list = LinkedList::<_, ()>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        // branch from first element
-        let branch_mut = list.first_mut()?.expect("Some(branch_mut)");
-        let mapped = branch_mut.map_leaf(|x| x);
-
-        let mut count = n - 1;
-
-        for leaf in mapped {
-            let leaf = leaf?;
-
-            assert_eq!(*leaf, count);
-
-            count = count.saturating_sub(1);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn deref_mapped_mutable_branch() -> Result<(), LinkError> {
-        let n: u64 = 32;
-
-        let mut list = LinkedList::<_, ()>::new();
-
-        for i in 0..n {
-            list.push(i)
-        }
-
-        // branch from first element
-        let branch_mut = list.first_mut()?.expect("Some(brach_mut)");
-        let mapped = branch_mut.map_leaf(|x| x);
-
-        assert_eq!(core::ops::Deref::deref(&mapped), &31);
-
-        Ok(())
     }
 }

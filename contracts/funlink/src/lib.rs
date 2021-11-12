@@ -7,13 +7,11 @@
 
 mod linked_list;
 use linked_list::LinkedList;
-use microkelvin::LinkError;
 
-use core::pin::Pin;
-use rkyv::{Archive, Serialize};
-use vm_proto::{Apply, Method};
+use rkyv::{Archive, Deserialize, Infallible, Serialize};
+use vm_proto::{Apply, Method, Scratch};
 
-#[derive(Archive, Serialize, Debug, Default)]
+#[derive(Archive, Serialize, Default, Deserialize)]
 pub struct FunLink {
     list: LinkedList<i32, ()>,
 }
@@ -24,7 +22,7 @@ impl FunLink {
     }
 }
 
-#[derive(Archive, Serialize, Debug)]
+#[derive(Archive, Serialize, Deserialize, Debug)]
 pub struct Push(pub i32);
 
 impl Method for Push {
@@ -33,24 +31,21 @@ impl Method for Push {
 }
 
 impl Apply<Push> for FunLink {
-    fn apply(mut self: Pin<&mut Self>, arg: &Push) {
+    fn apply(&mut self, arg: Push) {
         self.list.push(arg.0)
     }
 }
 
-#[derive(Archive, Serialize, Debug)]
+#[derive(Archive, Serialize, Deserialize, Debug)]
 pub struct Pop;
 
 impl Method for Pop {
     const NAME: &'static str = "pop";
-    type Return = Result<Option<i32>, LinkError>;
+    type Return = Option<i32>;
 }
 
 impl Apply<Pop> for FunLink {
-    fn apply(
-        mut self: Pin<&mut Self>,
-        _pop: &Pop,
-    ) -> Result<Option<i32>, LinkError> {
+    fn apply(&mut self, _: Pop) -> Option<i32> {
         vm_proto::abi::debug("yolo");
         self.list.pop()
     }
@@ -59,11 +54,25 @@ impl Apply<Pop> for FunLink {
 // to autogenerate
 
 #[no_mangle]
-fn push(s: Pin<&mut FunLink>, t: &Push, r: &mut <Push as Method>::Return) {
-    *r = s.apply(t);
+fn pop(
+    s: &<FunLink as Archive>::Archived,
+    t: &<Pop as Archive>::Archived,
+) -> Scratch {
+    let mut de: FunLink = s.deserialize(&mut Infallible).expect("infallible");
+    let arg: Pop = t.deserialize(&mut Infallible).expect("infallible");
+    let result = FunLink::apply(&mut de, arg);
+    let new_state = microkelvin::Portal::put(&de);
+    Scratch::write(&(new_state, result))
 }
 
 #[no_mangle]
-fn pop(s: Pin<&mut FunLink>, t: &Pop, r: &mut <Pop as Method>::Return) {
-    *r = s.apply(t);
+fn push(
+    s: &<FunLink as Archive>::Archived,
+    t: &<Push as Archive>::Archived,
+) -> Scratch {
+    let mut de: FunLink = s.deserialize(&mut Infallible).expect("infallible");
+    let arg: Push = t.deserialize(&mut Infallible).expect("infallible");
+    let result = FunLink::apply(&mut de, arg);
+    let new_state = microkelvin::Portal::put(&de);
+    Scratch::write(&(new_state, result))
 }
