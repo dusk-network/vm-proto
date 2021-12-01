@@ -5,18 +5,18 @@ use std::mem;
 
 use crate::definitions::*;
 
-//use rkyv::de::deserializers::*;
+use microkelvin::Store;
 use rkyv::validation::CheckArchiveError;
 use rkyv::{
     check_archived_root, ser::serializers::*, ser::Serializer,
-    validation::validators::DefaultValidator, Archive,
+    validation::validators::DefaultValidator, AlignedVec, Archive, Deserialize, Infallible,
+    Serialize,
 };
-use rkyv::{AlignedVec, Deserialize, Infallible, Serialize};
 
 use thiserror::Error;
 use wasmer::{
     imports, CompileError, ExportError, Function, ImportObject, Instance, LazyInit, Memory,
-    MemoryError, Module, RuntimeError, Store, WasmerEnv,
+    MemoryError, Module, RuntimeError, Store as WasmerStore, WasmerEnv,
 };
 
 type DefaultSerializer = CompositeSerializer<
@@ -89,10 +89,10 @@ impl ContractInstance {
 #[derive(Debug, Default)]
 pub struct State {
     map: Map<ContractId, ContractInstance>,
-    wasmer_store: Store,
+    wasmer_store: WasmerStore,
 }
 
-fn imports(store: &Store) -> ImportObject {
+fn imports(store: &WasmerStore) -> ImportObject {
     let env = TransactionEnv {
         memory: LazyInit::new(),
     };
@@ -122,22 +122,23 @@ struct TransactionEnv {
 }
 
 impl State {
-    pub fn deploy<State, Code>(&mut self, state: State, code: Code) -> Result<ContractId, VMError>
+    pub fn deploy<State, Code, S>(
+        &mut self,
+        state: State,
+        code: Code,
+        store: S,
+    ) -> Result<ContractId, VMError>
     where
-        State: Serialize<DefaultSerializer>,
+        S: Store,
         Code: Into<Vec<u8>>,
     {
-        let mut serialize = DefaultSerializer::default();
-        let state_ofs = serialize.serialize_value(&state)?;
-        let state = serialize.into_serializer().into_inner();
-
         let instance = ContractInstance {
             code: code.into(),
             state,
             state_ofs: state_ofs as i32,
         };
 
-        let id = instance.id();
+        let id = store.id();
 
         self.map.insert(id, instance);
         Ok(id)

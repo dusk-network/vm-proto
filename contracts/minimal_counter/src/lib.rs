@@ -4,11 +4,13 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
+#![feature(option_result_unwrap_unchecked)]
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #![feature(core_intrinsics, lang_items, alloc_error_handler)]
 
-use rkyv::{Archive, Deserialize, Infallible, Serialize};
-use vm_proto::{Apply, Method, Query, Scratch};
+use microkelvin::Store;
+use rkyv::{Archive, Deserialize, Serialize};
+use vm_proto::{AbiStore, Apply, Execute, Query, Transaction};
 
 #[derive(Clone, Debug, Archive, Deserialize, Serialize)]
 pub struct Counter {
@@ -24,7 +26,7 @@ impl Counter {
 #[derive(Archive, Serialize, Debug)]
 pub struct ReadCount;
 
-impl Method for ReadCount {
+impl Query for ReadCount {
     const NAME: &'static str = "read";
     type Return = u32;
 }
@@ -32,43 +34,56 @@ impl Method for ReadCount {
 #[derive(Archive, Serialize, Debug, Deserialize)]
 pub struct Increment(u32);
 
-impl Method for Increment {
+impl Transaction for Increment {
     const NAME: &'static str = "incr";
     type Return = ();
 }
 
-impl Query<ReadCount> for Counter {
-    fn query(
-        archived: &Self::Archived,
+impl<S> Execute<ReadCount, S> for Counter
+where
+    S: Store,
+{
+    fn execute(
+        archived_self: &Self::Archived,
         _: &<ReadCount as Archive>::Archived,
-    ) -> <ReadCount as Method>::Return {
-        archived.value.into()
+        _: &S,
+    ) -> <ReadCount as Query>::Return {
+        archived_self.value.into()
     }
 }
 
-impl Apply<Increment> for Counter {
-    fn apply(&mut self, t: Increment) -> <Increment as Method>::Return {
+impl<S> Apply<Increment, S> for Counter
+where
+    S: Store,
+{
+    fn apply(
+        &mut self,
+        t: &<Increment as Archive>::Archived,
+        _: &S,
+    ) -> <Increment as Transaction>::Return {
         let unarchived: u32 = t.0.into();
         self.value += unarchived;
     }
 }
 
 #[no_mangle]
-fn read(
-    s: &<Counter as Archive>::Archived,
-    q: &<ReadCount as Archive>::Archived,
-) -> Scratch {
-    Scratch::write(&Counter::query(s, q))
+unsafe fn read(
+    s: *const <Counter as Archive>::Archived,
+    q: *const <ReadCount as Archive>::Archived,
+    _ret: *mut <<ReadCount as Query>::Return as Archive>::Archived,
+) {
+    Counter::execute(&*s, &*q, &AbiStore);
+    todo!()
 }
 
 #[no_mangle]
-fn incr(
-    s: &<Counter as Archive>::Archived,
-    t: &<Increment as Archive>::Archived,
-) -> Scratch {
-    let mut de: Counter = s.deserialize(&mut Infallible).expect("infallible");
-    let arg: Increment = t.deserialize(&mut Infallible).expect("infallible");
-    let result = Counter::apply(&mut de, arg);
-    let new_state = microkelvin::Portal::put(&de);
-    Scratch::write(&(new_state, result))
+unsafe fn incr(
+    s: *mut <Counter as Archive>::Archived,
+    t: *const <Increment as Archive>::Archived,
+    _ret: *mut <<Increment as Transaction>::Return as Archive>::Archived,
+) {
+    let mut store = AbiStore;
+    let mut de_state = (&*s).deserialize(&mut store).unwrap_unchecked();
+    Counter::apply(&mut de_state, &*t, &AbiStore);
+    todo!()
 }
