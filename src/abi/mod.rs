@@ -18,5 +18,7 @@ mod ffi_store;
 #[cfg(not(feature = "host"))]
 pub use ffi_store::*;
 
-mod helpers;
-use helpers::*;
+#[cfg(not(feature = "host"))]
+pub mod helpers;
+#[cfg(not(feature = "host"))]
+pub use helpers::*;

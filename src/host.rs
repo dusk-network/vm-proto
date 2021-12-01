@@ -132,6 +132,7 @@ impl State {
         S: Store,
         Code: Into<Vec<u8>>,
     {
+
         let instance = ContractInstance {
             code: code.into(),
             state,

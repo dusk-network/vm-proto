@@ -2,10 +2,12 @@ use core::hash::Hash;
 
 use crate::abi::AbiStore;
 
-use dusk_hamt::Hamt;
-use rkyv::{Archive, Deserialize};
+use dusk_hamt::{Hamt, Lookup};
+use microkelvin::{BranchRef, BranchRefMut, MaybeArchived};
+use rkyv::{Archive, Deserialize, Serialize};
 
-struct Map<K, V> {
+#[derive(Clone, Archive, Deserialize, Serialize)]
+pub struct Map<K, V> {
     wrapping: Hamt<K, V, (), AbiStore>,
 }
 
@@ -16,17 +18,22 @@ where
     V: Archive + Clone,
     V::Archived: Deserialize<V, AbiStore>,
 {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Map {
             wrapping: Hamt::new(),
         }
     }
 
-    fn insert(&self, key: K, val: V) {
+    pub fn insert(&mut self, key: K, val: V) -> Option<V> {
+        self.wrapping.insert(key, val)
+    }
+
+    pub fn get(&self, key: &K) -> Option<impl BranchRef<V>> {
+        let _a = self.wrapping.get(key);
         todo!()
     }
 
-    // fn get(&self) -> Option<impl BranchRef<V>> {
-    //     todo!()
-    // }
+    pub fn get_mut(&mut self, key: &K) -> Option<impl BranchRefMut<V>> {
+        self.wrapping.get_mut(key);
+    }
 }

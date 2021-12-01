@@ -1,26 +1,22 @@
 use core::fmt::Debug;
 
-use microkelvin::Store;
 use rkyv::Archive;
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
 pub struct ContractId([u8; 32]);
 
-pub trait Execute<Q, S>
+pub trait Execute<Q>
 where
-    Self: Archive,
-    S: Store,
     Q: Query,
 {
-    fn execute(archived: &Self::Archived, q: &Q::Archived, store: &S) -> Q::Return;
+    fn execute(&self, q: &Q) -> Q::Return;
 }
 
-pub trait Apply<T, S>
+pub trait Apply<T>
 where
     T: Transaction,
-    S: Store,
 {
-    fn apply(&mut self, t: &T::Archived, store: &S) -> T::Return;
+    fn apply(&mut self, t: &T) -> T::Return;
 }
 
 pub trait Query: Archive {

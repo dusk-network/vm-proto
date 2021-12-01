@@ -8,83 +8,89 @@
 #![cfg_attr(target_arch = "wasm32", no_std)]
 #![feature(core_intrinsics, lang_items, alloc_error_handler)]
 
-use microkelvin::Store;
+use microkelvin::{BranchRef, BranchRefMut, MaybeArchived};
 use rkyv::{Archive, Deserialize, Serialize};
+use vm_proto::abi::helpers::Map;
 use vm_proto::abi::AbiStore;
 use vm_proto::{Apply, Execute, Query, Transaction};
 
-#[derive(Clone, Debug, Archive, Deserialize, Serialize)]
-pub struct Counter {
-    value: u32,
+#[derive(Clone, Archive, Deserialize, Serialize, Hash, PartialEq, Eq)]
+#[archive(as = "Self")]
+struct SecretHash([u8; 32]);
+
+#[derive(Clone, Archive, Deserialize, Serialize)]
+pub struct Register {
+    open_secrets: Map<SecretHash, u32>,
 }
 
-impl Counter {
-    pub fn new(value: u32) -> Self {
-        Counter { value }
+impl Register {
+    pub fn new() -> Self {
+        Register {
+            open_secrets: Map::new(),
+        }
     }
 }
 
-#[derive(Archive, Serialize, Debug)]
-pub struct ReadCount;
+#[derive(Archive, Serialize, Deserialize)]
+pub struct NumSecrets(SecretHash);
 
-impl Query for ReadCount {
-    const NAME: &'static str = "read";
+impl Query for NumSecrets {
+    const NAME: &'static str = "nums";
     type Return = u32;
 }
 
-#[derive(Archive, Serialize, Debug, Deserialize)]
-pub struct Increment(u32);
+#[derive(Archive, Serialize, Deserialize)]
+pub struct Gossip(SecretHash);
 
-impl Transaction for Increment {
-    const NAME: &'static str = "incr";
+impl Transaction for Gossip {
+    const NAME: &'static str = "goss";
     type Return = ();
 }
 
-impl<S> Execute<ReadCount, S> for Counter
-where
-    S: Store,
-{
-    fn execute(
-        archived_self: &Self::Archived,
-        _: &<ReadCount as Archive>::Archived,
-        _: &S,
-    ) -> <ReadCount as Query>::Return {
-        archived_self.value.into()
+impl Execute<NumSecrets> for Register {
+    fn execute(&self, q: &NumSecrets) -> <NumSecrets as Query>::Return {
+        self.open_secrets
+            .get(&q.0)
+            .map(|branch| match branch.leaf() {
+                MaybeArchived::Memory(m) => *m,
+                MaybeArchived::Archived(a) => (*a).into(),
+            })
+            .unwrap_or(0)
     }
 }
 
-impl<S> Apply<Increment, S> for Counter
-where
-    S: Store,
-{
-    fn apply(
-        &mut self,
-        t: &<Increment as Archive>::Archived,
-        _: &S,
-    ) -> <Increment as Transaction>::Return {
-        let unarchived: u32 = t.0.into();
-        self.value += unarchived;
+impl Apply<Gossip> for Register {
+    fn apply(&mut self, t: &Gossip) -> <Gossip as Transaction>::Return {
+        if let Some(mut branch) = self.open_secrets.get_mut(&t.0) {
+            *branch.leaf_mut() += 1;
+        }
+
+        self.open_secrets.insert(t.0.clone(), 1);
     }
 }
 
 #[no_mangle]
 unsafe fn read(
-    s: *const <Counter as Archive>::Archived,
-    q: *const <ReadCount as Archive>::Archived,
-    _ret: *mut <<ReadCount as Query>::Return as Archive>::Archived,
+    s: *const <Register as Archive>::Archived,
+    q: *const <NumSecrets as Archive>::Archived,
+    _ret: *mut <<NumSecrets as Query>::Return as Archive>::Archived,
 ) {
-    Counter::execute(&*s, &*q, &AbiStore);
+    let mut store = AbiStore;
+    let state: Register = (&*s).deserialize(&mut store).unwrap_unchecked();
+    let query: NumSecrets = (&*q).deserialize(&mut store).unwrap_unchecked();
+    Register::execute(&state, &query);
     todo!()
 }
 
 #[no_mangle]
 unsafe fn incr(
-    s: *mut <Counter as Archive>::Archived,
-    t: *const <Increment as Archive>::Archived,
-    _ret: *mut <<Increment as Transaction>::Return as Archive>::Archived,
+    s: *mut <Register as Archive>::Archived,
+    t: *const <Gossip as Archive>::Archived,
+    _ret: *mut <<Gossip as Transaction>::Return as Archive>::Archived,
 ) {
     let mut store = AbiStore;
-    let mut de_state = (&*s).deserialize(&mut store).unwrap_unchecked();
-    Counter::apply(&mut de_state, &*t, &AbiStore);
+    let mut state = (&*s).deserialize(&mut store).unwrap_unchecked();
+    let transaction = (&*t).deserialize(&mut store).unwrap_unchecked();
+    Register::apply(&mut state, &transaction);
     todo!()
 }
