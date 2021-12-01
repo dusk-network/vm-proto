@@ -10,7 +10,8 @@
 
 use microkelvin::Store;
 use rkyv::{Archive, Deserialize, Serialize};
-use vm_proto::{AbiStore, Apply, Execute, Query, Transaction};
+use vm_proto::abi::AbiStore;
+use vm_proto::{Apply, Execute, Query, Transaction};
 
 #[derive(Clone, Debug, Archive, Deserialize, Serialize)]
 pub struct Counter {
