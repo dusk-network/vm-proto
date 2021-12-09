@@ -16,7 +16,7 @@ use vm_proto::{Apply, Execute, Query, Transaction};
 
 #[derive(Clone, Archive, Deserialize, Serialize, Hash, PartialEq, Eq)]
 #[archive(as = "Self")]
-struct SecretHash([u8; 32]);
+pub struct SecretHash([u8; 32]);
 
 #[derive(Clone, Archive, Deserialize, Serialize)]
 pub struct Register {

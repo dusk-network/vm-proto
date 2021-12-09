@@ -3,7 +3,7 @@ use core::hash::Hash;
 use crate::abi::AbiStore;
 
 use dusk_hamt::{Hamt, Lookup};
-use microkelvin::{BranchRef, BranchRefMut, MaybeArchived};
+use microkelvin::{BranchRef, BranchRefMut};
 use rkyv::{Archive, Deserialize, Serialize};
 
 #[derive(Clone, Archive, Deserialize, Serialize)]
@@ -29,11 +29,10 @@ where
     }
 
     pub fn get(&self, key: &K) -> Option<impl BranchRef<V>> {
-        let _a = self.wrapping.get(key);
-        todo!()
+        self.wrapping.get(key)
     }
 
     pub fn get_mut(&mut self, key: &K) -> Option<impl BranchRefMut<V>> {
-        self.wrapping.get_mut(key);
+        self.wrapping.get_mut(key)
     }
 }
