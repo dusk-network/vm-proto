@@ -4,11 +4,14 @@
 //
 // Copyright (c) DUSK NETWORK. All rights reserved.
 
-#![feature(option_result_unwrap_unchecked)]
-#![cfg_attr(target_arch = "wasm32", no_std)]
-#![feature(core_intrinsics, lang_items, alloc_error_handler)]
+#![no_std]
+#![feature(
+    core_intrinsics,
+    lang_items,
+    alloc_error_handler,
+    option_result_unwrap_unchecked
+)]
 
-use microkelvin::Store;
 use rkyv::{Archive, Deserialize, Serialize};
 use vm_proto::abi::AbiStore;
 use vm_proto::{Apply, Execute, Query, Transaction};
@@ -24,7 +27,7 @@ impl Counter {
     }
 }
 
-#[derive(Archive, Serialize, Debug)]
+#[derive(Archive, Serialize, Debug, Deserialize)]
 pub struct ReadCount;
 
 impl Query for ReadCount {
@@ -40,51 +43,42 @@ impl Transaction for Increment {
     type Return = ();
 }
 
-impl<S> Execute<ReadCount, S> for Counter
-where
-    S: Store,
-{
-    fn execute(
-        archived_self: &Self::Archived,
-        _: &<ReadCount as Archive>::Archived,
-        _: &S,
-    ) -> <ReadCount as Query>::Return {
-        archived_self.value.into()
+impl Execute<ReadCount> for Counter {
+    fn execute(&self, _: &ReadCount) -> <ReadCount as Query>::Return {
+        self.value.into()
     }
 }
 
-impl<S> Apply<Increment, S> for Counter
-where
-    S: Store,
-{
-    fn apply(
-        &mut self,
-        t: &<Increment as Archive>::Archived,
-        _: &S,
-    ) -> <Increment as Transaction>::Return {
-        let unarchived: u32 = t.0.into();
-        self.value += unarchived;
+impl Apply<Increment> for Counter {
+    fn apply(&mut self, t: &Increment) -> <Increment as Transaction>::Return {
+        self.value += t.0;
     }
 }
 
 #[no_mangle]
 unsafe fn read(
-    s: *const <Counter as Archive>::Archived,
-    q: *const <ReadCount as Archive>::Archived,
+    s: &<Counter as Archive>::Archived,
+    q: &<ReadCount as Archive>::Archived,
     _ret: *mut <<ReadCount as Query>::Return as Archive>::Archived,
 ) {
-    Counter::execute(&*s, &*q, &AbiStore);
+    let mut store = AbiStore;
+    let de_state: Counter = (&*s).deserialize(&mut store).unwrap_unchecked();
+    let de_query: ReadCount = (&*q).deserialize(&mut store).unwrap_unchecked();
+    let _res: <ReadCount as Query>::Return = de_state.execute(&de_query);
     todo!()
 }
 
 #[no_mangle]
 unsafe fn incr(
-    s: *mut <Counter as Archive>::Archived,
-    t: *const <Increment as Archive>::Archived,
+    s: &mut <Counter as Archive>::Archived,
+    t: &<Increment as Archive>::Archived,
     _ret: *mut <<Increment as Transaction>::Return as Archive>::Archived,
 ) {
     let mut store = AbiStore;
-    let mut de_state = (&*s).deserialize(&mut store).unwrap_unchecked();
-    Counter::apply(&mut de_state, &*t, &AbiStore);
+    let mut de_state: Counter =
+        (&*s).deserialize(&mut store).unwrap_unchecked();
+    let de_transaction: Increment =
+        (&*t).deserialize(&mut store).unwrap_unchecked();
+    let _res = de_state.apply(&de_transaction);
     todo!()
 }
