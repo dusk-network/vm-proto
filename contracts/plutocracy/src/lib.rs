@@ -5,12 +5,10 @@
 // Copyright (c) DUSK NETWORK. All rights reserved.
 #![no_std]
 
-use core::pin::Pin;
+use rkyv::{Archive, Deserialize, Infallible, Serialize};
+use vm_proto::{Apply, Method, Query, Scratch};
 
-use rkyv::{Archive, Serialize};
-use vm_proto::{Apply, Method, Query};
-
-#[derive(Archive, Serialize, Debug, Default)]
+#[derive(Archive, Serialize, Debug, Default, Deserialize)]
 pub struct Plutocracy {
     treasury: u64,
 }
@@ -21,7 +19,7 @@ impl Plutocracy {
     }
 }
 
-#[derive(Archive, Serialize, Debug)]
+#[derive(Archive, Serialize, Deserialize, Debug)]
 pub struct TotalSupply;
 
 impl Method for TotalSupply {
@@ -30,12 +28,16 @@ impl Method for TotalSupply {
 }
 
 impl Query<TotalSupply> for Plutocracy {
-    fn query(&self, _arg: &TotalSupply) -> u64 {
-        self.treasury
+    fn query(
+        archived: &Self::Archived,
+        _arg: &<TotalSupply as Archive>::Archived,
+    ) -> u64 {
+        let dearchived: u64 = archived.treasury.into();
+        dearchived
     }
 }
 
-#[derive(Archive, Serialize, Debug)]
+#[derive(Archive, Serialize, Deserialize, Debug)]
 pub struct Mint {
     pub amount: u64,
 }
@@ -46,7 +48,7 @@ impl Method for Mint {
 }
 
 impl Apply<Mint> for Plutocracy {
-    fn apply(mut self: Pin<&mut Self>, mint: &Mint) {
+    fn apply(&mut self, mint: Mint) {
         self.treasury += mint.amount
     }
 }
@@ -55,14 +57,21 @@ impl Apply<Mint> for Plutocracy {
 
 #[no_mangle]
 fn total_supply(
-    s: &Plutocracy,
-    q: &TotalSupply,
-    r: &mut <TotalSupply as Method>::Return,
-) {
-    *r = s.query(q);
+    s: &<Plutocracy as Archive>::Archived,
+    q: &<TotalSupply as Archive>::Archived,
+) -> Scratch {
+    Scratch::write(&Plutocracy::query(s, q))
 }
 
 #[no_mangle]
-fn mint(s: Pin<&mut Plutocracy>, t: &Mint, r: &mut <Mint as Method>::Return) {
-    *r = s.apply(t);
+fn mint(
+    s: &<Plutocracy as Archive>::Archived,
+    t: &<Mint as Archive>::Archived,
+) -> Scratch {
+    let mut de: Plutocracy =
+        s.deserialize(&mut Infallible).expect("infallible");
+    let arg: Mint = t.deserialize(&mut Infallible).expect("infallible");
+    let result = Plutocracy::apply(&mut de, arg);
+    let new_state = microkelvin::Portal::put(&de);
+    Scratch::write(&(new_state, result))
 }

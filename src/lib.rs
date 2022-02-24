@@ -4,6 +4,9 @@
 mod definitions;
 pub use definitions::*;
 
+mod scratch;
+pub use scratch::Scratch;
+
 #[cfg(feature = "host")]
 mod host;
 
@@ -11,6 +14,7 @@ mod host;
 pub use host::*;
 
 pub mod abi;
+pub use abi::*;
 
 #[cfg(not(feature = "host"))]
 mod no_std_plumbing;

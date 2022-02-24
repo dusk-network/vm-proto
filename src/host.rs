@@ -5,18 +5,18 @@ use std::mem;
 
 use crate::definitions::*;
 
-//use rkyv::de::deserializers::*;
+use microkelvin::Store;
 use rkyv::validation::CheckArchiveError;
 use rkyv::{
     check_archived_root, ser::serializers::*, ser::Serializer,
-    validation::validators::DefaultValidator, Archive,
+    validation::validators::DefaultValidator, AlignedVec, Archive, Deserialize, Infallible,
+    Serialize,
 };
-use rkyv::{AlignedVec, Deserialize, Infallible, Serialize};
 
 use thiserror::Error;
 use wasmer::{
     imports, CompileError, ExportError, Function, ImportObject, Instance, LazyInit, Memory,
-    MemoryError, Module, RuntimeError, Store, WasmerEnv,
+    MemoryError, Module, RuntimeError, Store as WasmerStore, WasmerEnv,
 };
 
 type DefaultSerializer = CompositeSerializer<
@@ -77,7 +77,6 @@ where
 struct ContractInstance {
     pub code: Vec<u8>,
     pub state: AlignedVec,
-    pub state_ofs: i32,
 }
 
 impl ContractInstance {
@@ -89,10 +88,10 @@ impl ContractInstance {
 #[derive(Debug, Default)]
 pub struct State {
     map: Map<ContractId, ContractInstance>,
-    wasmer_store: Store,
+    wasmer_store: WasmerStore,
 }
 
-fn imports(store: &Store) -> ImportObject {
+fn imports(store: &WasmerStore) -> ImportObject {
     let env = TransactionEnv {
         memory: LazyInit::new(),
     };
@@ -122,40 +121,41 @@ struct TransactionEnv {
 }
 
 impl State {
-    pub fn deploy<State, Code>(&mut self, state: State, code: Code) -> Result<ContractId, VMError>
+    pub fn deploy<State, Code, S>(
+        &mut self,
+        state: State,
+        code: Code,
+        store: S,
+    ) -> Result<ContractId, VMError>
     where
-        State: Debug + Serialize<DefaultSerializer>,
+        S: Store,
         Code: Into<Vec<u8>>,
-    {
-        let mut serialize = DefaultSerializer::default();
-        let state_ofs = serialize.serialize_value(&state)?;
-        let state = serialize.into_serializer().into_inner();
-
+    {	
         let instance = ContractInstance {
             code: code.into(),
             state,
-            state_ofs: state_ofs as i32,
         };
 
-        let id = instance.id();
+        let stored = store.put(instance);
+        let id = stored.ident();
 
         self.map.insert(id, instance);
         Ok(id)
     }
 
-    pub fn query<M>(&self, id: ContractId, arg: &M) -> Result<M::Return, VMError>
+    pub fn query<Q>(&self, id: ContractId, arg: &Q) -> Result<Q::Return, VMError>
     where
-        M: Method + Archive + for<'a> Serialize<WriteSerializer<&'a mut [u8]>>,
-        M::Return: Archive,
-        <M::Return as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
-            + Deserialize<<M as Method>::Return, Infallible>,
+        Q: Query + Archive + for<'a> Serialize<WriteSerializer<&'a mut [u8]>>,
+        Q::Return: Archive,
+        <Q as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
+            + Deserialize<<Q as Query>::Return, Infallible>,
     {
         if let Some(contract) = self.map.get(&id) {
             let module = Module::new(&self.wasmer_store, &contract.code)?;
             let instance = Instance::new(&module, &imports(&self.wasmer_store)).unwrap();
             let function = instance
                 .exports
-                .get_native_function::<(i32, i32, i32), ()>(M::NAME)?;
+                .get_native_function::<(i32, i32, i32), ()>(Q::NAME)?;
             let memory = instance.exports.get_memory("memory")?;
 
             // Copy the data the contract needs to execute correctly into its memory.
@@ -182,7 +182,7 @@ impl State {
 
                 // TODO, make sure we have enough room in the memory for the return value
 
-                (arg_ofs, arg_ofs + mem::size_of::<M>() as i32)
+                (arg_ofs, arg_ofs + mem::size_of::<Q>() as i32)
             };
 
             function.call(contract.state_ofs, arg_ofs, ret_ofs)?;
@@ -190,9 +190,9 @@ impl State {
             unsafe {
                 let mem_slice = memory.data_unchecked();
                 let ret_ofs = ret_ofs as usize;
-                let ret_len = mem::size_of::<<M as Method>::Return>();
+                let ret_len = mem::size_of::<<Q as Query>::Return>();
                 let ret_slice = &mem_slice[ret_ofs..][..ret_len];
-                let archived = check_archived_root::<M::Return>(ret_slice)?;
+                let archived = check_archived_root::<Q::Return>(ret_slice)?;
                 let a = archived.deserialize(&mut Infallible)?;
                 Ok(a)
             }
@@ -201,19 +201,19 @@ impl State {
         }
     }
 
-    pub fn apply<M>(&mut self, id: ContractId, arg: &M) -> Result<M::Return, VMError>
+    pub fn apply<T>(&mut self, id: ContractId, transaction: T) -> Result<T::Return, VMError>
     where
-        M: Method + Archive + for<'a> Serialize<WriteSerializer<&'a mut [u8]>>,
-        M::Return: Archive,
-        <M::Return as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
-            + Deserialize<<M as Method>::Return, Infallible>,
+        T: Archive + for<'a> Serialize<WriteSerializer<&'a mut [u8]>> + Transaction,
+        T::Return: Archive,
+        <T::Return as Archive>::Archived: for<'a> bytecheck::CheckBytes<DefaultValidator<'a>>
+            + Deserialize<<T as Transaction>::Return, Infallible>,
     {
         if let Some(contract) = self.map.get_mut(&id) {
             let module = Module::new(&self.wasmer_store, &contract.code)?;
             let instance = Instance::new(&module, &imports(&self.wasmer_store)).unwrap();
             let function = instance
                 .exports
-                .get_native_function::<(i32, i32, i32), ()>(M::NAME)?;
+                .get_native_function::<(i32, i32, i32), ()>(T::NAME)?;
             let memory = instance.exports.get_memory("memory")?;
 
             // Copy the data the contract needs to execute correctly into its memory.
@@ -232,11 +232,11 @@ impl State {
             // Write the argument into wasm memory
 
             let mut serialize = WriteSerializer::new(remaining_slice);
-            let arg_ofs = state_len as i32 + serialize.serialize_value(arg)? as i32;
+            let arg_ofs = state_len as i32 + serialize.serialize_value(&transaction)? as i32;
 
             // FIXME: make sure we have enough room in the memory
 
-            let ret_ofs = arg_ofs + mem::size_of::<M>() as i32;
+            let ret_ofs = arg_ofs + mem::size_of::<T>() as i32;
 
             function.call(contract.state_ofs, arg_ofs, ret_ofs)?;
 
@@ -245,10 +245,11 @@ impl State {
             contract.state[..].copy_from_slice(&mem_slice[..state_len]);
 
             let ret_ofs = ret_ofs as usize;
-            let ret_len = mem::size_of::<<<M as Method>::Return as Archive>::Archived>();
+            let ret_len = mem::size_of::<<<T as Transaction>::Return as Archive>::Archived>();
 
-            let archived =
-                check_archived_root::<<M as Method>::Return>(&mem_slice[ret_ofs..][..ret_len])?;
+            let archived = check_archived_root::<<T as Transaction>::Return>(
+                &mem_slice[ret_ofs..][..ret_len],
+            )?;
 
             Ok(archived.deserialize(&mut Infallible).expect("Infallible"))
         } else {

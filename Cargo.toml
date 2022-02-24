@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2018"
 
 [dependencies]
-bytecheck = { version = "0.6", optional = true }
-rkyv = { version = "0.7", default-features = false, features = ["size_32", "archive_le"] }
-thiserror = "1.0"
-wasmer = { version = "2.0", optional = true }
-wee_alloc = "0.4"
+bytecheck = { version = "0.6.5", optional = true, default-features = false }
+rkyv = { version = "0.7.20", default-features = false, features = ["archive_le", "size_32", "alloc"] }
+thiserror = "1.0.30"
+wasmer = { version = "2.0.0", optional = true }
+wee_alloc = "0.4.5"
+microkelvin = { version = "0.12.0-rc", default-features = false }
+dusk-hamt = { path = "../dusk-hamt" }
 
 [dev-dependencies]
 plutocracy = { path = "contracts/plutocracy" }
-funlink = { path = "contracts/funlink", features = ["host"] }
+funlink = { path = "contracts/funlink" }
 
 [features]
 default = ["host"]

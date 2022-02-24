@@ -1,5 +1,3 @@
-use std::pin::Pin;
-
 use vm_proto::*;
 
 use funlink::{FunLink, Pop, Push};
@@ -13,17 +11,17 @@ const N: i32 = 1;
 fn contract_standalone() {
     let mut fun = FunLink::new();
 
-    assert_eq!(Pin::new(&mut fun).apply(&Pop), Ok(None));
+    assert_eq!(fun.apply(Pop), None);
 
     for i in 0..N {
-        Pin::new(&mut fun).apply(&Push(i));
+        fun.apply(Push(i));
     }
 
     for i in 0..N {
-        assert_eq!(Pin::new(&mut fun).apply(&Pop), Ok(Some(N - i - 1)));
+        assert_eq!(fun.apply(Pop), Some(N - i - 1));
     }
 
-    assert_eq!(Pin::new(&mut fun).apply(&Pop), Ok(None));
+    assert_eq!(fun.apply(Pop), None);
 }
 
 #[test]
@@ -33,17 +31,17 @@ fn query_deployed_contract() -> Result<(), Box<dyn std::error::Error>> {
 
     let id = state.deploy(fun, CODE)?;
 
-    assert_eq!(state.apply(id, &Pop)?, Ok(None));
+    assert_eq!(state.apply(id, Pop)?, None);
 
     for i in 0..N {
-        state.apply(id, &Push(i))?;
+        state.apply(id, Push(i))?;
     }
 
     for i in 0..N {
-        assert_eq!(state.apply(id, &Pop)?, Ok(Some(N - i - 1)))
+        assert_eq!(state.apply(id, Pop)?, Some(N - i - 1))
     }
 
-    assert_eq!(state.apply(id, &Pop)?, Ok(None));
+    assert_eq!(state.apply(id, Pop)?, None);
 
     Ok(())
 }
